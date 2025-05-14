@@ -64,9 +64,8 @@ class Ingredient(models.Model):
         return 0
     
 class Barcode(models.Model):
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='barcodes')
     barcode = models.CharField(max_length=100)
     macros = models.JSONField()
     
     def __str__(self):
-        return f"{self.barcode} - {self.user.username}"
+        return f"{self.barcode}"

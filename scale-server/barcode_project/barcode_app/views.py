@@ -68,7 +68,6 @@ class LoginView(APIView):
     def post(self, request):
         try:
             username = request.data.get('username')
-            email = request.data.get('email')
             password = request.data.get('password')
 
             user = User.objects.filter(username=username, password=password).first()
@@ -277,64 +276,60 @@ class MealDetailView(APIView):
 @method_decorator(csrf_exempt, name='dispatch')
 class AssignBarcodeView(APIView):
     @swagger_auto_schema(
-        operation_description="Przypisywanie kodu kreskowego i makroskładników do zalogowanego użytkownika",
+        operation_description="Przypisywanie kodu kreskowego i makroskładników do bazy (OpenFood API)",
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
             properties={
                 'barcode': openapi.Schema(type=openapi.TYPE_STRING, description='Kod kreskowy'),
-                'macros': openapi.Schema(type=openapi.TYPE_OBJECT, description='Dane makroskładników w formacie JSON'),
             },
-            required=['barcode', 'macros']
+            required=['barcode']
         ),
         responses={200: openapi.Response('Barcode and macros assigned successfully')}
     )
     def post(self, request):
+        import requests
         try:
-            user_id = request.session.get('user_id')
-            if not user_id:
-                print("No user_id in session") 
-                return Response({"error": "User not logged in"}, status=status.HTTP_401_UNAUTHORIZED)
-
-            user = get_object_or_404(User, id=user_id)
-            print(f"User {user.username} is logged in")
-
             barcode = request.data.get('barcode')
-            macros = request.data.get('macros')
+            if not barcode:
+                return Response({"error": "Barcode is required"}, status=status.HTTP_400_BAD_REQUEST)
 
-            print(f"Received barcode: {barcode}")
-            print(f"Received macros: {macros}")
-
-            Barcode.objects.create(user=user, barcode=barcode, macros=macros)
-
-            return Response({"message": "Barcode and macros assigned successfully"}, status=status.HTTP_200_OK)
+            url = f"https://world.openfoodfacts.org/api/v0/product/{barcode}.json"
+            response = requests.get(url)
+            if response.status_code != 200:
+                return Response({"error": "Failed to fetch data from Open Food Facts"}, status=response.status_code)
+            food_data = response.json()
+            if food_data.get('status') == 0:
+                return Response({"error": "Product not found"}, status=404)
+            product = food_data.get('product', {})
+            nutriments = product.get('nutriments', {})
+            macros = {
+                "product_name": product.get('product_name', 'Unknown'),
+                "energy_kcal": nutriments.get('energy-kcal', 'Unknown'),
+                "protein_100g": nutriments.get('proteins_100g', 'Unknown'),
+                "fat_100g": nutriments.get('fat_100g', 'Unknown'),
+                "carbs_100g": nutriments.get('carbohydrates_100g', 'Unknown')
+            }
+            Barcode.objects.create(barcode=barcode, macros=macros)
+            return Response({"message": "Barcode and macros assigned successfully", "macros": macros}, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 @method_decorator(csrf_exempt, name='dispatch')
 class GetUserDataView(APIView):
     @swagger_auto_schema(
-        operation_description="Pobieranie wszystkich danych użytkownika (barcode + makroskładniki)",
+        operation_description="Pobieranie wszystkich danych z bazy kodów kreskowych (barcode + makroskładniki)",
         responses={200: openapi.Response('List of barcodes and macros')}
     )
     def get(self, request):
         try:
-            user_id = request.session.get('user_id')
-            if not user_id:
-                return Response({"error": "User not logged in"}, status=status.HTTP_401_UNAUTHORIZED)
-
-            user = get_object_or_404(User, id=user_id)
-
-            barcodes = user.barcodes.all()
+            barcodes = Barcode.objects.all()
             barcode_list = [
                 {
-                    "id": barcode.id,
                     "barcode": barcode.barcode,
                     "macros": barcode.macros
                 }
                 for barcode in barcodes
             ]
-
             return Response({"data": barcode_list}, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
