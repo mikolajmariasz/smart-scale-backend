@@ -135,16 +135,12 @@ class MealListView(APIView):
         return Response({'meals': data})
 
     @swagger_auto_schema(
-        operation_description="Tworzenie nowego posiłku ze składnikami i ich wartościami odżywczymi",
+        operation_description="Tworzenie nowego posiłku ze składnikami, emotką i ich wartościami odżywczymi",
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
             properties={
                 'meal_name': openapi.Schema(type=openapi.TYPE_STRING, description='Nazwa posiłku'),
-                'meal_type': openapi.Schema(
-                    type=openapi.TYPE_STRING, 
-                    description='Typ posiłku',
-                    enum=['BREAKFAST', 'LUNCH', 'DINNER']
-                ),
+                'emoji': openapi.Schema(type=openapi.TYPE_STRING, description='Emotka posiłku'),
                 'date': openapi.Schema(type=openapi.TYPE_STRING, format='date-time', description='Data posiłku'),
                 'ingredients': openapi.Schema(
                     type=openapi.TYPE_ARRAY,
@@ -169,11 +165,11 @@ class MealListView(APIView):
                     description='Lista składników'
                 )
             },
-            required=['meal_name', 'meal_type', 'ingredients']
+            required=['meal_name', 'ingredients']
         ),
         responses={
             201: openapi.Response('Posiłek został utworzony'),
-            400: openapi.Response('Błędne dane lub posiłek tego typu już istnieje dla danej daty'),
+            400: openapi.Response('Błędne dane lub posiłek już istnieje dla danej daty'),
             401: openapi.Response('Użytkownik nie jest zalogowany')
         }
     )
@@ -183,34 +179,28 @@ class MealListView(APIView):
             return Response({'error': 'User not logged in'}, status=401)
 
         meal_name = request.data.get('meal_name')
-        meal_type = request.data.get('meal_type')
         date = request.data.get('date', timezone.now())
+        emoji = request.data.get('emoji')
         ingredients_data = request.data.get('ingredients', [])
 
-        if not meal_name or not meal_type or not ingredients_data:
+        if not meal_name or not ingredients_data:
             return Response({
-                'error': 'meal_name, meal_type and ingredients are required'
-            }, status=400)
-
-        if meal_type not in [choice[0] for choice in Meal.MEAL_TYPES]:
-            return Response({
-                'error': 'meal_type must be one of: BREAKFAST, LUNCH, DINNER'
+                'error': 'meal_name and ingredients are required'
             }, status=400)
 
         if Meal.objects.filter(
             user_id=user_id,
-            meal_type=meal_type,
             date__date=timezone.datetime.fromisoformat(date).date() if isinstance(date, str) else date.date()
         ).exists():
             return Response({
-                'error': f'A {meal_type.lower()} already exists for this date'
+                'error': f'A meal already exists for this date'
             }, status=400)
 
         meal = Meal.objects.create(
             user_id=user_id,
             meal_name=meal_name,
-            meal_type=meal_type,
-            date=date
+            date=date,
+            emoji=emoji
         )
 
         ingredients = []
@@ -242,7 +232,7 @@ class MealListView(APIView):
         return Response({
             'id': meal.id,
             'meal_name': meal.meal_name,
-            'meal_type': meal.meal_type,
+            'emoji': meal.emoji,
             'date': meal.date,
             'ingredients': ingredients,
             'total_nutrition': {
@@ -292,6 +282,13 @@ class AssignBarcodeView(APIView):
             barcode = request.data.get('barcode')
             if not barcode:
                 return Response({"error": "Barcode is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+            barcode_obj = Barcode.objects.filter(barcode=barcode).first()
+            if barcode_obj:
+                return Response({
+                    "message": "Barcode and macros (from cache) assigned successfully",
+                    "macros": barcode_obj.macros
+                }, status=status.HTTP_200_OK)
 
             url = f"https://world.openfoodfacts.org/api/v0/product/{barcode}.json"
             response = requests.get(url)

@@ -9,22 +9,15 @@ class User(models.Model):
         return self.username
     
 class Meal(models.Model):
-    MEAL_TYPES = [
-        ('BREAKFAST', 'Breakfast'),
-        ('LUNCH', 'Lunch'),
-        ('DINNER', 'Dinner'),
-    ]
-    
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='meals')
     meal_name = models.CharField(max_length=100)
-    meal_type = models.CharField(max_length=10, choices=MEAL_TYPES)
     date = models.DateTimeField()
-
+    emoji = models.CharField(max_length=10, null=True, blank=True)
     class Meta:
-        unique_together = ['user', 'date', 'meal_type']
+        unique_together = ['user', 'date']
 
     def __str__(self):
-        return f"{self.meal_type} - {self.meal_name} ({self.user.username})"
+        return f"{self.meal_name} ({self.user.username})"
 
 class Ingredient(models.Model):
     meal = models.ForeignKey(Meal, on_delete=models.CASCADE, related_name='ingredients')
